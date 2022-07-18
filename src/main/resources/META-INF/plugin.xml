@@ -7,12 +7,10 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <applicationService serviceImplementation="com.github.hsz.intellijplatformpluginoauth2flow.services.MyApplicationService"/>
-        <projectService serviceImplementation="com.github.hsz.intellijplatformpluginoauth2flow.services.MyProjectService"/>
+        <httpRequestHandler implementation="com.github.hsz.intellijplatformpluginoauth2flow.services.MyRestService"/>
     </extensions>
 
-    <applicationListeners>
-        <listener class="com.github.hsz.intellijplatformpluginoauth2flow.listeners.MyProjectManagerListener"
-                  topic="com.intellij.openapi.project.ProjectManagerListener"/>
-    </applicationListeners>
+    <actions>
+        <action class="com.github.hsz.intellijplatformpluginoauth2flow.actions.AuthAction" id="AuthAction" text="AuthAction" description="Auth" />
+    </actions>
 </idea-plugin>

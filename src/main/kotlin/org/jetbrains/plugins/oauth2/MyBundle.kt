@@ -1,4 +1,4 @@
-package com.github.hsz.intellijplatformpluginoauth2flow
+package org.jetbrains.plugins.oauth2
 
 import com.intellij.DynamicBundle
 import org.jetbrains.annotations.NonNls

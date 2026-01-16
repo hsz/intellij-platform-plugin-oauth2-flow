@@ -1,15 +1,17 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.hsz.intellijplatformpluginoauth2flow</id>
-    <name>intellij-platform-plugin-oauth2-flow</name>
+    <id>org.jetbrains.plugins.oauth2</id>
+    <name>OAuth2 Example</name>
     <vendor>hsz</vendor>
-
-    <depends>com.intellij.modules.platform</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
+    <depends>com.intellij.modules.platform</depends>
+
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.hsz.intellijplatformpluginoauth2flow.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.hsz.intellijplatformpluginoauth2flow.startup.MyProjectActivity" />
+        <applicationConfigurable instance="org.jetbrains.plugins.oauth2.AuthConfigurable"
+                                 id="org.jetbrains.plugins.oauth2.AuthConfigurable"
+                                 displayName="My Plugin Auth"/>
+        <httpRequestHandler implementation="org.jetbrains.plugins.oauth2.AuthRestService"/>
     </extensions>
 </idea-plugin>

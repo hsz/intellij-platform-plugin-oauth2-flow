@@ -2,6 +2,7 @@ package org.jetbrains.plugins.oauth2
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import org.kohsuke.github.GitHub
 import org.kohsuke.github.GitHubBuilder
 
 /**
@@ -13,24 +14,18 @@ class GitHubService {
 
     private val authService = service<AuthService>()
 
+    private val token
+        get() = checkNotNull(authService.getToken()) { "User is not authenticated" }
+
     /**
-     * Get GitHub API client instance.
-     * Returns null if user is not authenticated.
+     * Get a GitHub API client instance.
+     * Returns null if the user is not authenticated.
      */
     val github
-        get() = runCatching {
-            val token = authService.getToken()
-            GitHubBuilder().withOAuthToken(token).build()
-        }
-            .onFailure { throw IllegalStateException("GitHub API not available", it) }
-            .getOrThrow()
+        get() = GitHubBuilder().withOAuthToken(token).build()
 
     /**
      * Check if GitHub API is available (user is authenticated).
      */
-    fun isAvailable(): Boolean = authService.isLoggedIn()
-
-    companion object {
-        fun getInstance(): GitHubService = service()
-    }
+    fun isAvailable() = authService.isLoggedIn()
 }

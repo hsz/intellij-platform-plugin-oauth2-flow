@@ -32,6 +32,8 @@ fun interface AuthListener {
 
 val AUTH_TOPIC = Topic.create("Auth changes", AuthListener::class.java)
 
+private val gson = Gson()
+
 @Service(Service.Level.APP)
 @State(name = "AuthSettings", storages = [Storage("authSettings.xml")])
 class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
@@ -150,7 +152,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
             .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        return Gson().fromJson(response.body(), Map::class.java)["access_token"] as? String
+        return gson.fromJson(response.body(), Map::class.java)["access_token"] as? String
             ?: throw IllegalStateException("Failed to exchange code for token")
     }
 

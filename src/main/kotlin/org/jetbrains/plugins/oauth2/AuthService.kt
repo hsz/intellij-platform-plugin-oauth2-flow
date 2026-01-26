@@ -6,6 +6,7 @@ import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.generateServiceName
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.passwordSafe.PasswordSafe
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
@@ -13,6 +14,11 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.util.messages.Topic
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.jetbrains.ide.BuiltInServerManager
 import java.net.URI
 import java.net.http.HttpClient
@@ -28,7 +34,7 @@ val AUTH_TOPIC = Topic.create("Auth changes", AuthListener::class.java)
 
 @Service(Service.Level.APP)
 @State(name = "AuthSettings", storages = [Storage("authSettings.xml")])
-class AuthService : PersistentStateComponent<AuthService.State> {
+class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
 
     data class State(var username: String? = null)
 
@@ -45,11 +51,12 @@ class AuthService : PersistentStateComponent<AuthService.State> {
 
     private val httpClient = HttpClient.newHttpClient()
     private val credentialAttributes = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/myplugin/callback"
 
     init {
-        ApplicationManager.getApplication().executeOnPooledThread {
+        scope.launch {
             cachedToken = PasswordSafe.instance.getPassword(credentialAttributes)?.also { notifyAuthChanged() }
         }
     }
@@ -70,7 +77,7 @@ class AuthService : PersistentStateComponent<AuthService.State> {
     private fun notifyAuthChanged() =
         ApplicationManager.getApplication().messageBus.syncPublisher(AUTH_TOPIC).authChanged()
 
-    fun logout() = ApplicationManager.getApplication().executeOnPooledThread {
+    fun logout() = scope.launch {
         saveToken(null)
         myState = State()
         notifyAuthChanged()
@@ -113,7 +120,7 @@ class AuthService : PersistentStateComponent<AuthService.State> {
         val verifier = currentCodeVerifier ?: return
         currentCodeVerifier = null
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        scope.launch {
             runCatching {
                 exchangeCodeForToken(code, verifier)
             }.onSuccess { token ->
@@ -158,5 +165,9 @@ class AuthService : PersistentStateComponent<AuthService.State> {
         }.onFailure { e ->
             println("Failed to fetch user profile: ${e.message}")
         }
+    }
+
+    override fun dispose() {
+        scope.cancel()
     }
 }

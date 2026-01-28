@@ -87,9 +87,6 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
 
     private lateinit var codeVerifier: String
 
-    /**
-     * Step 1: Start OAuth authorization flow with PKCE.
-     */
     fun startLogin() {
         codeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
         val challenge = Base64.getUrlEncoder()
@@ -98,9 +95,6 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
         BrowserUtil.browse(buildAuthorizationUrl(challenge))
     }
 
-    /**
-     * Build GitHub OAuth authorization URL with PKCE.
-     */
     private fun buildAuthorizationUrl(codeChallenge: String) =
         "https://github.com/login/oauth/authorize" +
                 "?client_id=$OAUTH_CLIENT_ID" +
@@ -109,13 +103,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
                 "&code_challenge=$codeChallenge" +
                 "&code_challenge_method=S256"
 
-    /**
-     * Step 2: Handle OAuth callback with authorization code.
-     */
     fun handleCallback(code: String) {
-//        val verifier = codeVerifier ?: return
-//        codeVerifier = null
-
         scope.launch {
             runCatching { exchangeCodeForToken(code, codeVerifier) }
                 .onSuccess { token ->

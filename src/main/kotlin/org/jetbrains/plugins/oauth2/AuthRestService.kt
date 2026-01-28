@@ -3,9 +3,10 @@ package org.jetbrains.plugins.oauth2
 import com.intellij.openapi.components.service
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
-import io.netty.handler.codec.http.*
-import io.netty.util.CharsetUtil
+import io.netty.handler.codec.http.FullHttpRequest
+import io.netty.handler.codec.http.QueryStringDecoder
 import org.jetbrains.ide.RestService
+import org.jetbrains.io.response
 
 /**
  * Handles the OAuth2 callback by providing a local REST endpoint.
@@ -13,35 +14,23 @@ import org.jetbrains.ide.RestService
  */
 class AuthRestService : RestService() {
 
-    private val authService by lazy { service<AuthService>() }
+    companion object {
+        const val SERVICE_NAME = "myplugin"
+        const val HTML_RESPONSE =
+            "<p><strong>Authentication Successful!</strong> Close this tab and return to the IDE.</p>"
+    }
 
-    override fun getServiceName(): String = "myplugin"
+    override fun getServiceName() = SERVICE_NAME
 
     override fun execute(
         urlDecoder: QueryStringDecoder,
         request: FullHttpRequest,
         context: ChannelHandlerContext,
     ): String? {
-        if (!urlDecoder.path().contains("/callback")) {
-            return "Unknown path"
-        }
-
         val code = urlDecoder.parameters()["code"]?.firstOrNull() ?: return "No authorization code found"
-        authService.handleCallback(code)
 
-        val html = "<p><strong>Authentication Successful!</strong> Close this tab and return to the IDE.</p>"
-
-        sendResponse(
-            request, context,
-            DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1,
-                HttpResponseStatus.OK,
-                Unpooled.copiedBuffer(html, CharsetUtil.UTF_8),
-            ).apply {
-                headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8")
-                HttpUtil.setContentLength(this, content().readableBytes().toLong())
-            },
-        )
+        service<AuthService>().handleCallback(code)
+        sendResponse(request, context, response("text/html", Unpooled.wrappedBuffer(HTML_RESPONSE.toByteArray())))
 
         return null
     }

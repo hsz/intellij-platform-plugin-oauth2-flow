@@ -12,6 +12,7 @@ import com.intellij.util.io.DigestUtil
 import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
 import org.jetbrains.ide.BuiltInServerManager
+import org.kohsuke.github.GitHubBuilder
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -30,12 +31,12 @@ private val gson = Gson()
 @State(name = "AuthSettings", storages = [Storage("authSettings.xml")])
 class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
 
-    data class State(var username: String? = null)
-
     companion object {
         private const val OAUTH_CLIENT_ID = "Iv23ctuaqovvSqutt2KT"
         private const val OAUTH_CLIENT_SECRET = "09938f222c92793fc691defc64e03e2643011ecc"
     }
+
+    data class State(var username: String? = null)
 
     @Volatile
     private var myState = State()
@@ -47,8 +48,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
     private val credentialAttributes = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/myplugin/callback"
-    private val githubService by lazy { service<GitHubService>() }
+    private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/${AuthRestService.SERVICE_NAME}"
 
     init {
         scope.launch {
@@ -121,7 +121,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
                 exchangeCodeForToken(code, verifier)
             }.onSuccess { token ->
                 saveToken(token)
-                fetchUserProfile()
+                fetchUserProfile(token)
                 notifyAuthChanged()
             }.onFailure {
                 println("OAuth error: ${it.message}")
@@ -147,9 +147,9 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
             ?: throw IllegalStateException("Failed to exchange code for token")
     }
 
-    private fun fetchUserProfile() = runCatching {
-        val user = githubService.github.myself
-        myState = State(user.login)
+    private fun fetchUserProfile(token: String) = runCatching {
+        val github = GitHubBuilder().withOAuthToken(token).build()
+        myState = State(github.myself.login)
     }.onFailure {
         println("Failed to fetch user profile: ${it.message}")
     }

@@ -24,21 +24,19 @@ class AuthConfigurable : Configurable, Disposable {
     override fun createComponent() = JPanel(BorderLayout()).also { panel = it }.apply {
         updatePanel()
         ApplicationManager.getApplication().messageBus.connect(this@AuthConfigurable)
-            .subscribe(AUTH_TOPIC, AuthListener { invokeLater(ModalityState.any()) { panel.updatePanel() } })
+            .subscribe(AUTH_TOPIC, AuthListener { invokeLater(ModalityState.any()) { updatePanel() } })
     }
 
-    private fun JPanel.updatePanel() {
+    private fun updatePanel() = panel.apply {
         removeAll()
-        add(
-            panel {
-                if (authService.isLoggedIn()) {
-                    row("Username") { label(authService.state.username ?: "Unknown") }
-                    row { button("Logout") { authService.logout() } }
-                } else {
-                    row { button("Login with GitHub") { authService.startLogin() } }
-                }
-            },
-        )
+        add(panel {
+            if (authService.isLoggedIn()) {
+                row("Username") { label(authService.state.username ?: "Unknown") }
+                row { button("Logout") { authService.logout() } }
+            } else {
+                row { button("Login with GitHub") { authService.startLogin() } }
+            }
+        })
         revalidate()
     }
 

@@ -7,7 +7,10 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
 import com.intellij.util.io.DigestUtil
 import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
@@ -82,26 +85,23 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
 
     fun isLoggedIn() = cachedToken != null
 
-    private var currentCodeVerifier: String? = null
+    private lateinit var codeVerifier: String
 
     /**
      * Step 1: Start OAuth authorization flow with PKCE.
      */
     fun startLogin() {
-        val encoder = Base64.getUrlEncoder().withoutPadding()
-        val codeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
-        val sha = DigestUtil.sha256().digest(codeVerifier.toByteArray())
-        val challenge = encoder.encodeToString(sha)
-        val authUrl = buildAuthorizationUrl(redirectUri, challenge)
-
-        currentCodeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
-        BrowserUtil.browse(authUrl)
+        codeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
+        val challenge = Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(DigestUtil.sha256().digest(codeVerifier.toByteArray()))
+        BrowserUtil.browse(buildAuthorizationUrl(challenge))
     }
 
     /**
      * Build GitHub OAuth authorization URL with PKCE.
      */
-    private fun buildAuthorizationUrl(redirectUri: String, codeChallenge: String) =
+    private fun buildAuthorizationUrl(codeChallenge: String) =
         "https://github.com/login/oauth/authorize" +
                 "?client_id=$OAUTH_CLIENT_ID" +
                 "&scope=read:user%20user:email" +
@@ -113,19 +113,17 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
      * Step 2: Handle OAuth callback with authorization code.
      */
     fun handleCallback(code: String) {
-        val verifier = currentCodeVerifier ?: return
-        currentCodeVerifier = null
+//        val verifier = codeVerifier ?: return
+//        codeVerifier = null
 
         scope.launch {
-            runCatching {
-                exchangeCodeForToken(code, verifier)
-            }.onSuccess { token ->
-                saveToken(token)
-                fetchUserProfile(token)
-                notifyAuthChanged()
-            }.onFailure {
-                println("OAuth error: ${it.message}")
-            }
+            runCatching { exchangeCodeForToken(code, codeVerifier) }
+                .onSuccess { token ->
+                    saveToken(token)
+                    fetchUserProfile(token)
+                    notifyAuthChanged()
+                }
+                .onFailure { println("OAuth error: ${it.message}") }
         }
     }
 
@@ -150,9 +148,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
     private fun fetchUserProfile(token: String) = runCatching {
         val github = GitHubBuilder().withOAuthToken(token).build()
         myState = State(github.myself.login)
-    }.onFailure {
-        println("Failed to fetch user profile: ${it.message}")
-    }
+    }.onFailure { println("Failed to fetch user profile: ${it.message}") }
 
     override fun dispose() = scope.cancel()
 }

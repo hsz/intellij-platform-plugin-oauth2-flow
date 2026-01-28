@@ -2,7 +2,6 @@ package org.jetbrains.plugins.oauth2
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
-import org.kohsuke.github.GitHub
 import org.kohsuke.github.GitHubBuilder
 
 /**

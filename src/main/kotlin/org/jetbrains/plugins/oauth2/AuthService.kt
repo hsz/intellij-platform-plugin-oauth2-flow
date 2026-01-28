@@ -1,7 +1,6 @@
 package org.jetbrains.plugins.oauth2
 
 import com.google.gson.Gson
-import com.intellij.collaboration.auth.services.PkceUtils
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.generateServiceName
 import com.intellij.ide.BrowserUtil
@@ -9,6 +8,7 @@ import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
+import com.intellij.util.io.DigestUtil
 import com.intellij.util.messages.Topic
 import kotlinx.coroutines.*
 import org.jetbrains.ide.BuiltInServerManager
@@ -88,13 +88,13 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
      * Step 1: Start OAuth authorization flow with PKCE.
      */
     fun startLogin() {
-        currentCodeVerifier = PkceUtils.generateCodeVerifier() + PkceUtils.generateCodeVerifier()
-
-        val challenge = PkceUtils.generateShaCodeChallenge(
-            requireNotNull(currentCodeVerifier),
-            Base64.getUrlEncoder().withoutPadding(),
-        )
+        val encoder = Base64.getUrlEncoder().withoutPadding()
+        val codeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
+        val sha = DigestUtil.sha256().digest(codeVerifier.toByteArray())
+        val challenge = encoder.encodeToString(sha)
         val authUrl = buildAuthorizationUrl(redirectUri, challenge)
+
+        currentCodeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
         BrowserUtil.browse(authUrl)
     }
 

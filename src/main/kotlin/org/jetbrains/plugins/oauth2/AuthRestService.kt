@@ -13,6 +13,8 @@ import org.jetbrains.ide.RestService
  */
 class AuthRestService : RestService() {
 
+    private val authService by lazy { service<AuthService>() }
+
     override fun getServiceName(): String = "myplugin"
 
     override fun execute(
@@ -24,21 +26,22 @@ class AuthRestService : RestService() {
             return "Unknown path"
         }
 
-        urlDecoder.parameters()["code"]
-            ?.firstOrNull()
-            ?.let { service<AuthService>().handleCallback(it) }
-            ?: return "No authorization code found"
+        val code = urlDecoder.parameters()["code"]?.firstOrNull() ?: return "No authorization code found"
+        authService.handleCallback(code)
 
-        val html = "<p><strong>Authentication Successful!</strong> You can now close this tab and return to the IDE.</p>"
+        val html = "<p><strong>Authentication Successful!</strong> Close this tab and return to the IDE.</p>"
 
-        sendResponse(request, context, DefaultFullHttpResponse(
-            HttpVersion.HTTP_1_1,
-            HttpResponseStatus.OK,
-            Unpooled.copiedBuffer(html, CharsetUtil.UTF_8)
-        ).apply {
-            headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8")
-            HttpUtil.setContentLength(this, content().readableBytes().toLong())
-        })
+        sendResponse(
+            request, context,
+            DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1,
+                HttpResponseStatus.OK,
+                Unpooled.copiedBuffer(html, CharsetUtil.UTF_8),
+            ).apply {
+                headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8")
+                HttpUtil.setContentLength(this, content().readableBytes().toLong())
+            },
+        )
 
         return null
     }

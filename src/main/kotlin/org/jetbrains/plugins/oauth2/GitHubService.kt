@@ -12,7 +12,7 @@ import org.kohsuke.github.GitHubBuilder
 @Service(Service.Level.APP)
 class GitHubService {
 
-    private val authService = service<AuthService>()
+    private val authService by lazy { service<AuthService>() }
 
     private val token
         get() = checkNotNull(authService.getToken()) { "User is not authenticated" }
@@ -23,9 +23,4 @@ class GitHubService {
      */
     val github
         get() = GitHubBuilder().withOAuthToken(token).build()
-
-    /**
-     * Check if GitHub API is available (user is authenticated).
-     */
-    fun isAvailable() = authService.isLoggedIn()
 }

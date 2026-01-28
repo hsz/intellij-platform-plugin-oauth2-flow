@@ -8,17 +8,9 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.PersistentStateComponent
-import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.State
-import com.intellij.openapi.components.Storage
-import com.intellij.openapi.components.service
+import com.intellij.openapi.components.*
 import com.intellij.util.messages.Topic
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import org.jetbrains.ide.BuiltInServerManager
 import java.net.URI
 import java.net.http.HttpClient
@@ -56,6 +48,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/myplugin/callback"
+    private val githubService by lazy { service<GitHubService>() }
 
     init {
         scope.launch {
@@ -64,7 +57,9 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
     }
 
     override fun getState() = myState
-    override fun loadState(state: State) { myState = state }
+    override fun loadState(state: State) {
+        myState = state
+    }
 
     fun getToken() = when {
         ApplicationManager.getApplication().isDispatchThread -> cachedToken
@@ -97,7 +92,7 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
 
         val challenge = PkceUtils.generateShaCodeChallenge(
             requireNotNull(currentCodeVerifier),
-            Base64.getUrlEncoder().withoutPadding()
+            Base64.getUrlEncoder().withoutPadding(),
         )
         val authUrl = buildAuthorizationUrl(redirectUri, challenge)
         BrowserUtil.browse(authUrl)
@@ -106,14 +101,13 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
     /**
      * Build GitHub OAuth authorization URL with PKCE.
      */
-    private fun buildAuthorizationUrl(redirectUri: String, codeChallenge: String): String {
-        return "https://github.com/login/oauth/authorize" +
+    private fun buildAuthorizationUrl(redirectUri: String, codeChallenge: String) =
+        "https://github.com/login/oauth/authorize" +
                 "?client_id=$OAUTH_CLIENT_ID" +
                 "&scope=read:user%20user:email" +
                 "&redirect_uri=$redirectUri" +
                 "&code_challenge=$codeChallenge" +
                 "&code_challenge_method=S256"
-    }
 
     /**
      * Step 2: Handle OAuth callback with authorization code.
@@ -129,15 +123,12 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
                 saveToken(token)
                 fetchUserProfile()
                 notifyAuthChanged()
-            }.onFailure { e ->
-                println("OAuth error: ${e.message}")
+            }.onFailure {
+                println("OAuth error: ${it.message}")
             }
         }
     }
 
-    /**
-     * Exchange authorization code for access token.
-     */
     private fun exchangeCodeForToken(code: String, codeVerifier: String): String {
         val body = "client_id=$OAUTH_CLIENT_ID" +
                 "&client_secret=$OAUTH_CLIENT_SECRET" +
@@ -156,20 +147,12 @@ class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
             ?: throw IllegalStateException("Failed to exchange code for token")
     }
 
-    /**
-     * Step 3: Fetch user profile from GitHub API.
-     */
-    private fun fetchUserProfile() {
-        runCatching {
-            val github = service<GitHubService>().github
-            val user = github.myself
-            myState = State(user.login)
-        }.onFailure { e ->
-            println("Failed to fetch user profile: ${e.message}")
-        }
+    private fun fetchUserProfile() = runCatching {
+        val user = githubService.github.myself
+        myState = State(user.login)
+    }.onFailure {
+        println("Failed to fetch user profile: ${it.message}")
     }
 
-    override fun dispose() {
-        scope.cancel()
-    }
+    override fun dispose() = scope.cancel()
 }

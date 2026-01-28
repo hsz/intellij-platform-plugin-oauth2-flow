@@ -16,7 +16,7 @@ import javax.swing.JPanel
  */
 class AuthConfigurable : Configurable, Disposable {
 
-    private val authService = service<AuthService>()
+    private val authService by lazy { service<AuthService>() }
     private lateinit var panel: JPanel
 
     override fun getDisplayName() = "My Plugin Auth"

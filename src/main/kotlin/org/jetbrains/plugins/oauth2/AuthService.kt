@@ -70,7 +70,7 @@ class AuthService : Disposable {
         if (cachedToken != null || loginJob?.isActive == true) return
         loginJob = scope.launch {
             try {
-                val token = requestAccessToken()
+                val token = requestToken()
                 saveToken(token)
                 updateConnectedState(token)
             } catch (e: CancellationException) {
@@ -101,7 +101,7 @@ class AuthService : Disposable {
         _state.value = AuthState.Disconnected
     }
 
-    private suspend fun requestAccessToken(): String {
+    private suspend fun requestToken(): String {
         val requestId = DigestUtil.digestToHash(DigestUtil.sha512())
         val codeVerifier = DigestUtil.digestToHash(DigestUtil.sha512())
 
@@ -182,10 +182,11 @@ class AuthService : Disposable {
         _state.value = AuthState.Connected(fetchUserProfile(token))
     }
 
-    private fun fetchUserProfile(token: String) =
+    private suspend fun fetchUserProfile(token: String): String? = withContext(Dispatchers.IO) {
         runCatching { GitHubBuilder().withOAuthToken(token).build().myself.login }
             .onFailure { thisLogger().warn("Failed to fetch user profile", it) }
             .getOrNull()
+    }
 
     override fun dispose() = scope.cancel()
 }

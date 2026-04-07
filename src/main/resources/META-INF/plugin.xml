@@ -4,14 +4,11 @@
     <name>OAuth2 Example</name>
     <vendor>hsz</vendor>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable instance="org.jetbrains.plugins.oauth2.AuthConfigurable"
-                                 id="org.jetbrains.plugins.oauth2.AuthConfigurable"
-                                 displayName="My Plugin Auth"/>
-        <httpRequestHandler implementation="org.jetbrains.plugins.oauth2.AuthRestService"/>
+                                 id="org.jetbrains.plugins.oauth2.AuthConfigurable"/>
+        <httpRequestHandler implementation="org.jetbrains.plugins.oauth2.AuthService$AuthRestService"/>
     </extensions>
 </idea-plugin>

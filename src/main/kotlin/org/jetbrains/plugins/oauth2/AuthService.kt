@@ -6,137 +6,186 @@ import com.intellij.credentialStore.generateServiceName
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.State
-import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.io.DigestUtil
-import com.intellij.util.messages.Topic
+import io.netty.buffer.Unpooled
+import io.netty.channel.ChannelHandlerContext
+import io.netty.handler.codec.http.FullHttpRequest
+import io.netty.handler.codec.http.QueryStringDecoder
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.jetbrains.ide.BuiltInServerManager
+import org.jetbrains.ide.RestService
+import org.jetbrains.io.response
 import org.kohsuke.github.GitHubBuilder
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
-fun interface AuthListener {
-    fun authChanged()
+private const val OAUTH_CLIENT_ID = "Iv23ctuaqovvSqutt2KT"
+private const val OAUTH_CLIENT_SECRET = "09938f222c92793fc691defc64e03e2643011ecc"
+private const val SERVICE_NAME = "myplugin"
+private const val HTML_RESPONSE = "<p><b>Authentication Successful!</b> Close this tab and return to the IDE.</p>"
+
+sealed interface AuthState {
+    data object Disconnected : AuthState
+    data class Connected(val username: String? = null) : AuthState
 }
 
-val AUTH_TOPIC = Topic.create("Auth changes", AuthListener::class.java)
-
-private val gson = Gson()
-
 @Service(Service.Level.APP)
-@State(name = "AuthSettings", storages = [Storage("authSettings.xml")])
-class AuthService : PersistentStateComponent<AuthService.State>, Disposable {
+class AuthService : Disposable {
 
-    companion object {
-        private const val OAUTH_CLIENT_ID = "Iv23ctuaqovvSqutt2KT"
-        private const val OAUTH_CLIENT_SECRET = "09938f222c92793fc691defc64e03e2643011ecc"
-    }
+    private val requests = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/$SERVICE_NAME"
+    private val credentials = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val httpClient = HttpClient.newHttpClient()
+    private val gson = Gson()
+    private val _state = MutableStateFlow<AuthState>(AuthState.Disconnected)
 
-    data class State(var username: String? = null)
-
-    @Volatile
-    private var myState = State()
+    val state = _state.asStateFlow()
 
     @Volatile
     private var cachedToken: String? = null
 
-    private val httpClient = HttpClient.newHttpClient()
-    private val credentialAttributes = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/${AuthRestService.SERVICE_NAME}"
+    @Volatile
+    private var loginJob: Job? = null
 
     init {
         scope.launch {
-            cachedToken = PasswordSafe.instance.getPassword(credentialAttributes)?.also { notifyAuthChanged() }
+            val token = PasswordSafe.instance.getPassword(credentials) ?: return@launch
+
+            cachedToken = token
+            updateConnectedState(token)
         }
     }
 
-    override fun getState() = myState
-    override fun loadState(state: State) {
-        myState = state
+    fun login() {
+        if (cachedToken != null || loginJob?.isActive == true) return
+        loginJob = scope.launch {
+            try {
+                val token = requestAccessToken()
+                saveToken(token)
+                updateConnectedState(token)
+            } catch (e: CancellationException) {
+                _state.value = AuthState.Disconnected
+                throw e
+            } catch (t: Throwable) {
+                saveToken(null)
+                _state.value = AuthState.Disconnected
+                thisLogger().warn("OAuth login failed", t)
+            } finally {
+                loginJob = null
+            }
+        }
     }
 
-    fun getToken() = when {
-        ApplicationManager.getApplication().isDispatchThread -> cachedToken
-        else -> PasswordSafe.instance.getPassword(credentialAttributes)
-    }
+    fun cancelLogin() {
+        loginJob?.cancel()
+        loginJob = null
 
-    private fun saveToken(token: String?) {
-        cachedToken = token
-        PasswordSafe.instance.setPassword(credentialAttributes, token)
+        if (cachedToken == null) {
+            _state.value = AuthState.Disconnected
+        }
     }
-
-    private fun notifyAuthChanged() =
-        ApplicationManager.getApplication().messageBus.syncPublisher(AUTH_TOPIC).authChanged()
 
     fun logout() = scope.launch {
+        cancelLogin()
         saveToken(null)
-        myState = State()
-        notifyAuthChanged()
+        _state.value = AuthState.Disconnected
     }
 
-    fun isLoggedIn() = cachedToken != null
+    private suspend fun requestAccessToken(): String {
+        val requestId = DigestUtil.digestToHash(DigestUtil.sha512())
+        val codeVerifier = DigestUtil.digestToHash(DigestUtil.sha512())
 
-    private lateinit var codeVerifier: String
-
-    fun startLogin() {
-        codeVerifier = DigestUtil.digestToHash(DigestUtil.sha256())
-        val challenge = Base64.getUrlEncoder()
-            .withoutPadding()
-            .encodeToString(DigestUtil.sha256().digest(codeVerifier.toByteArray()))
-        BrowserUtil.browse(buildAuthorizationUrl(challenge))
-    }
-
-    private fun buildAuthorizationUrl(codeChallenge: String) =
-        "https://github.com/login/oauth/authorize" +
-                "?client_id=$OAUTH_CLIENT_ID" +
-                "&scope=read:user%20user:email" +
-                "&redirect_uri=$redirectUri" +
-                "&code_challenge=$codeChallenge" +
-                "&code_challenge_method=S256"
-
-    fun handleCallback(code: String) {
-        scope.launch {
-            runCatching { exchangeCodeForToken(code, codeVerifier) }
-                .onSuccess { token ->
-                    saveToken(token)
-                    fetchUserProfile(token)
-                    notifyAuthChanged()
-                }
-                .onFailure { println("OAuth error: ${it.message}") }
+        val request = CompletableDeferred<String>()
+        requests[requestId] = request
+        try {
+            BrowserUtil.browse(buildAuthorizationUrl(requestId, codeVerifier))
+            return exchangeCodeForToken(request.await(), codeVerifier)
+        } finally {
+            request.cancel()
+            requests.remove(requestId)
         }
     }
 
-    private fun exchangeCodeForToken(code: String, codeVerifier: String): String {
-        val body = "client_id=$OAUTH_CLIENT_ID" +
+    private fun buildAuthorizationUrl(requestId: String, codeVerifier: String): String {
+        val codeChallenge = DigestUtil.sha256().digest(codeVerifier.toByteArray())
+        val codeChallengeEncoded = Base64.getUrlEncoder().withoutPadding().encodeToString(codeChallenge)
+
+        return "https://github.com/login/oauth/authorize" +
+                "?client_id=$OAUTH_CLIENT_ID" +
+                "&scope=read:user%20user:email" +
+                "&state=$requestId" +
+                "&redirect_uri=$redirectUri" +
+                "&code_challenge=$codeChallengeEncoded" +
+                "&code_challenge_method=S256"
+    }
+
+    private suspend fun exchangeCodeForToken(code: String, codeVerifier: String): String = withContext(Dispatchers.IO) {
+        val uri = "https://github.com/login/oauth/access_token" +
+                "?client_id=$OAUTH_CLIENT_ID" +
                 "&client_secret=$OAUTH_CLIENT_SECRET" +
                 "&code=$code" +
                 "&redirect_uri=$redirectUri" +
                 "&code_verifier=$codeVerifier"
 
         val request = HttpRequest.newBuilder()
-            .uri(URI.create("https://github.com/login/oauth/access_token"))
+            .uri(URI.create(uri))
             .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        return gson.fromJson(response.body(), Map::class.java)["access_token"] as? String
+        gson.fromJson(response.body(), Map::class.java)["access_token"] as? String
             ?: throw IllegalStateException("Failed to exchange code for token")
     }
 
-    private fun fetchUserProfile(token: String) = runCatching {
-        val github = GitHubBuilder().withOAuthToken(token).build()
-        myState = State(github.myself.login)
-    }.onFailure { println("Failed to fetch user profile: ${it.message}") }
+    /**
+     * Handles the OAuth2 callback by providing a local REST endpoint.
+     * The endpoint is available at: http://localhost:63342/api/myplugin
+     */
+    internal class AuthRestService : RestService() {
+
+        override fun getServiceName() = SERVICE_NAME
+
+        override fun execute(
+            urlDecoder: QueryStringDecoder,
+            request: FullHttpRequest,
+            context: ChannelHandlerContext,
+        ): String? {
+            val parameters = urlDecoder.parameters()
+            val state = parameters["state"]?.firstOrNull() ?: return "No authorization state found"
+            val code = parameters["code"]?.firstOrNull() ?: return "No authorization code found"
+            val currentRequest = service<AuthService>().requests[state] ?: return "No active OAuth request found"
+
+            currentRequest.complete(code)
+            sendResponse(request, context, response("text/html", Unpooled.wrappedBuffer(HTML_RESPONSE.toByteArray())))
+            return null
+        }
+    }
+
+    private fun saveToken(token: String?) {
+        cachedToken = token
+        PasswordSafe.instance.setPassword(credentials, token)
+    }
+
+    private suspend fun updateConnectedState(token: String) {
+        _state.value = AuthState.Connected()
+        _state.value = AuthState.Connected(fetchUserProfile(token))
+    }
+
+    private fun fetchUserProfile(token: String) =
+        runCatching { GitHubBuilder().withOAuthToken(token).build().myself.login }
+            .onFailure { thisLogger().warn("Failed to fetch user profile", it) }
+            .getOrNull()
 
     override fun dispose() = scope.cancel()
 }

@@ -38,7 +38,7 @@ sealed interface AuthState {
 }
 
 @Service(Service.Level.APP)
-class AuthService(private val cs: CoroutineScope) {
+class AuthService(val coroutineScope: CoroutineScope) {
 
     private val requests = ConcurrentHashMap<String, CompletableDeferred<String>>()
     private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/$SERVICE_NAME"
@@ -62,7 +62,7 @@ class AuthService(private val cs: CoroutineScope) {
     private var loginJob: Job? = null
 
     init {
-        cs.launch {
+        coroutineScope.launch {
             val token = PasswordSafe.instance.getPassword(credentials) ?: return@launch
 
             cachedToken = token
@@ -72,7 +72,7 @@ class AuthService(private val cs: CoroutineScope) {
 
     fun login() {
         if (cachedToken != null || loginJob?.isActive == true) return
-        loginJob = cs.launch {
+        loginJob = coroutineScope.launch {
             try {
                 val token = requestToken()
                 storedToken = token
@@ -99,7 +99,7 @@ class AuthService(private val cs: CoroutineScope) {
         }
     }
 
-    fun logout() = cs.launch {
+    fun logout() = coroutineScope.launch {
         cancelLogin()
         storedToken = null
         _state.value = AuthState.Disconnected

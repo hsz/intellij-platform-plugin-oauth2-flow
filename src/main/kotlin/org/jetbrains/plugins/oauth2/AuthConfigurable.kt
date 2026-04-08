@@ -2,11 +2,10 @@ package org.jetbrains.plugins.oauth2
 
 import com.intellij.openapi.components.service
 import com.intellij.openapi.options.BoundConfigurable
-import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.panel
-import kotlinx.coroutines.*
+import kotlinx.coroutines.launch
 
 class AuthConfigurable : BoundConfigurable("My Plugin Auth") {
 
@@ -14,17 +13,14 @@ class AuthConfigurable : BoundConfigurable("My Plugin Auth") {
 
     override fun createPanel() = panel {
         val content = Wrapper()
-        val scope = CoroutineScope(SupervisorJob())
 
         row {
             cell(content).align(AlignX.FILL)
         }
 
-        scope.launch(Dispatchers.IO) {
+        authService.coroutineScope.launch {
             authService.state.collect { content.setContent(createView(it)) }
         }
-
-        disposable?.let { Disposer.register(it) { scope.cancel() } }
     }
 
     private fun createView(state: AuthState) = panel {

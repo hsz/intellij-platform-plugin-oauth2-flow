@@ -5,7 +5,6 @@ import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.generateServiceName
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.passwordSafe.PasswordSafe
-import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -39,12 +38,11 @@ sealed interface AuthState {
 }
 
 @Service(Service.Level.APP)
-class AuthService : Disposable {
+class AuthService(private val cs: CoroutineScope) {
 
     private val requests = ConcurrentHashMap<String, CompletableDeferred<String>>()
     private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/$SERVICE_NAME"
     private val credentials = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val httpClient = HttpClient.newHttpClient()
     private val gson = Gson()
     private val _state = MutableStateFlow<AuthState>(AuthState.Disconnected)
@@ -64,7 +62,7 @@ class AuthService : Disposable {
     private var loginJob: Job? = null
 
     init {
-        scope.launch {
+        cs.launch {
             val token = PasswordSafe.instance.getPassword(credentials) ?: return@launch
 
             cachedToken = token
@@ -74,7 +72,7 @@ class AuthService : Disposable {
 
     fun login() {
         if (cachedToken != null || loginJob?.isActive == true) return
-        loginJob = scope.launch {
+        loginJob = cs.launch {
             try {
                 val token = requestToken()
                 storedToken = token
@@ -101,7 +99,7 @@ class AuthService : Disposable {
         }
     }
 
-    fun logout() = scope.launch {
+    fun logout() = cs.launch {
         cancelLogin()
         storedToken = null
         _state.value = AuthState.Disconnected
@@ -183,6 +181,4 @@ class AuthService : Disposable {
             .onFailure { thisLogger().warn("Failed to fetch user profile", it) }
             .getOrNull()
     }
-
-    override fun dispose() = scope.cancel()
 }

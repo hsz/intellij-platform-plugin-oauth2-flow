@@ -53,6 +53,12 @@ class AuthService : Disposable {
 
     @Volatile
     private var cachedToken: String? = null
+    private var storedToken: String?
+        get() = cachedToken
+        set(value) {
+            cachedToken = value
+            PasswordSafe.instance.setPassword(credentials, value)
+        }
 
     @Volatile
     private var loginJob: Job? = null
@@ -62,7 +68,7 @@ class AuthService : Disposable {
             val token = PasswordSafe.instance.getPassword(credentials) ?: return@launch
 
             cachedToken = token
-            updateConnectedState(token)
+            _state.value = AuthState.Connected(fetchUserProfile(token))
         }
     }
 
@@ -71,13 +77,13 @@ class AuthService : Disposable {
         loginJob = scope.launch {
             try {
                 val token = requestToken()
-                saveToken(token)
-                updateConnectedState(token)
+                storedToken = token
+                _state.value = AuthState.Connected(fetchUserProfile(token))
             } catch (e: CancellationException) {
                 _state.value = AuthState.Disconnected
                 throw e
             } catch (t: Throwable) {
-                saveToken(null)
+                storedToken = null
                 _state.value = AuthState.Disconnected
                 thisLogger().warn("OAuth login failed", t)
             } finally {
@@ -97,7 +103,7 @@ class AuthService : Disposable {
 
     fun logout() = scope.launch {
         cancelLogin()
-        saveToken(null)
+        storedToken = null
         _state.value = AuthState.Disconnected
     }
 
@@ -170,16 +176,6 @@ class AuthService : Disposable {
             sendResponse(request, context, response("text/html", Unpooled.wrappedBuffer(HTML_RESPONSE.toByteArray())))
             return null
         }
-    }
-
-    private fun saveToken(token: String?) {
-        cachedToken = token
-        PasswordSafe.instance.setPassword(credentials, token)
-    }
-
-    private suspend fun updateConnectedState(token: String) {
-        _state.value = AuthState.Connected()
-        _state.value = AuthState.Connected(fetchUserProfile(token))
     }
 
     private suspend fun fetchUserProfile(token: String): String? = withContext(Dispatchers.IO) {

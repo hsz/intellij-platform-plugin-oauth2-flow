@@ -44,7 +44,6 @@ class AuthService(val coroutineScope: CoroutineScope) {
     private val redirectUri get() = "http://localhost:${BuiltInServerManager.getInstance().port}/api/$SERVICE_NAME"
     private val credentials = CredentialAttributes(generateServiceName("MyPluginAuth", "OAuthToken"))
     private val httpClient = HttpClient.newHttpClient()
-    private val gson = Gson()
     private val _state = MutableStateFlow<AuthState>(AuthState.Disconnected)
 
     val state = _state.asStateFlow()
@@ -148,7 +147,7 @@ class AuthService(val coroutineScope: CoroutineScope) {
             .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        gson.fromJson(response.body(), Map::class.java)["access_token"] as? String
+        Gson().fromJson(response.body(), Map::class.java)["access_token"] as? String
             ?: throw IllegalStateException("Failed to exchange code for token")
     }
 

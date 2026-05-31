@@ -50,7 +50,7 @@ class AuthService(val coroutineScope: CoroutineScope) {
     }
 
     fun login() {
-        if (_state.value is AuthState.Connected || loginJob?.isActive == true) return
+        if (_state.value is AuthState.Connected) return
         loginJob = coroutineScope.launch {
             try {
                 val token = requestToken().also(::storeToken)
